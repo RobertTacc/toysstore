@@ -107,15 +107,27 @@ async function saveState(state) {
   await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
 }
 
-async function sendDiscordNotification(status) {
+async function sendDiscordNotification(status, options = {}) {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
-  if (!webhookUrl || status !== "in_stock") return;
+  if (!webhookUrl) {
+    if (options.required) {
+      throw new Error("DISCORD_WEBHOOK_URL is missing");
+    }
+    return;
+  }
+
+  const isTest = options.test === true;
+  if (!isTest && status !== "in_stock") return;
+
+  const content = isTest
+    ? `Testbesked fra Toysstore-monitoren. Discord webhook virker. Seneste læste status: ${status}. ${product.url}`
+    : `Pokemon-produktet ser ud til at være på lager nu: ${product.url}`;
 
   const response = await fetch(webhookUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      content: `Pokemon-produktet ser ud til at være på lager nu: ${product.url}`,
+      content,
     }),
   });
 
@@ -162,6 +174,11 @@ async function main() {
 
   if (becameAvailable) {
     await sendDiscordNotification(status);
+  }
+
+  if (process.env.SEND_DISCORD_TEST === "true") {
+    await sendDiscordNotification(status, { test: true, required: true });
+    console.log("Discord test notification sent.");
   }
 }
 
