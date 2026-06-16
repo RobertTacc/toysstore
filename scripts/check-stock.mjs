@@ -98,3 +98,71 @@ function detectStockStatus(html) {
 }
 
 async function loadState() {
+  if (!existsSync(statePath)) return {};
+  return JSON.parse(await readFile(statePath, "utf8"));
+}
+
+async function saveState(state) {
+  await mkdir(new URL("../data/", import.meta.url), { recursive: true });
+  await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+}
+
+async function sendDiscordNotification(status) {
+  const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+  if (!webhookUrl || status !== "in_stock") return;
+
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      content: `Pokemon-produktet ser ud til at være på lager nu: ${product.url}`,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Discord notification failed: ${response.status}`);
+  }
+}
+
+async function main() {
+  const response = await fetch(product.url, {
+    headers: {
+      "user-agent": userAgent,
+      "accept-language": "da-DK,da;q=0.9,en;q=0.8",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Toysstore returned HTTP ${response.status}`);
+  }
+
+  const html = await response.text();
+  const status = detectStockStatus(html);
+  const previousState = await loadState();
+  const previousStatus = previousState.status ?? "unknown";
+  const changed = status !== previousStatus;
+  const becameAvailable = previousStatus !== "in_stock" && status === "in_stock";
+
+  const nextState = {
+    product: product.name,
+    url: product.url,
+    status,
+    previousStatus,
+    changed,
+    checkedAt: new Date().toISOString(),
+  };
+
+  console.log(`${product.name}: ${status}`);
+  if (changed) {
+    console.log(`Status changed from ${previousStatus} to ${status}`);
+    await saveState(nextState);
+  } else {
+    console.log("Status unchanged; state file left as-is.");
+  }
+
+  if (becameAvailable) {
+    await sendDiscordNotification(status);
+  }
+}
+
+await main();
